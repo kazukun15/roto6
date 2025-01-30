@@ -6,7 +6,7 @@ import tensorflow as tf
 from tensorflow.keras.models import Sequential
 from tensorflow.keras.layers import Dense, Dropout
 from tensorflow.keras.optimizers import Adam
-from sklearn.model_selection import train_test_split
+from sklearn.model_selection import train_test_split, StratifiedKFold
 from sklearn.preprocessing import OneHotEncoder, StandardScaler
 import optuna
 from sklearn.ensemble import RandomForestClassifier
@@ -16,29 +16,41 @@ from sklearn.metrics import classification_report, f1_score, roc_auc_score
 os.environ['TF_ENABLE_ONEDNN_OPTS'] = '0'
 tf.get_logger().setLevel('ERROR')
 
-# データ読み込み関数
+#############################
+# データ読み込み＆前処理関数
+#############################
 def load_data(uploaded_file):
+    """
+    CSVファイルを読み込み、数値列のみ抜き出し、
+    最後の列をラベルとして返す。
+    """
     df = pd.read_csv(uploaded_file)
     numeric_cols = df.select_dtypes(include=[np.number]).columns
     X = df[numeric_cols].iloc[:, :-1].values  # 特徴量
     y = df[numeric_cols].iloc[:, -1].values   # ラベル
-    return np.array(X), np.array(y)  # NumPy 配列に変換
+    return np.array(X), np.array(y)
 
-# データ前処理関数
 def preprocess_data(X, y):
+    """
+    データをスケーリングし、ラベルをOne-Hotエンコードした結果を返す。
+    """
     scaler = StandardScaler()
     X_scaled = scaler.fit_transform(X)
 
     encoder = OneHotEncoder(sparse_output=False)
     y_encoded = encoder.fit_transform(y.reshape(-1, 1))
 
-    # クラスラベルの取得（OneHotEncoderのcategories_属性）
-    class_labels = encoder.categories_[0]
+    # クラス数
     n_classes = y_encoded.shape[1]
-    return X_scaled, y_encoded, n_classes, class_labels
+    return X_scaled, y_encoded, n_classes
 
+#############################
 # モデル構築関数
+#############################
 def build_nn_model(input_dim, units, dropout, learning_rate, n_classes):
+    """
+    ニューラルネットワーク（全結合）モデルを構築
+    """
     model = Sequential([
         Dense(units, activation='relu', input_dim=input_dim),
         Dropout(dropout),
@@ -51,11 +63,19 @@ def build_nn_model(input_dim, units, dropout, learning_rate, n_classes):
     return model
 
 def build_rf_model():
+    """
+    ランダムフォレストモデルを構築
+    """
     model = RandomForestClassifier(n_estimators=100, random_state=42)
     return model
 
+#############################
 # ハイパーパラメータ最適化関数
+#############################
 def optimize_hyperparameters(X_train, y_train, n_classes):
+    """
+    Optunaでニューラルネットワークのハイパーパラメータを最適化
+    """
     def objective(trial):
         units = trial.suggest_int('units', 32, 256, step=32)
         dropout = trial.suggest_float('dropout', 0.1, 0.5, step=0.1)
@@ -71,8 +91,10 @@ def optimize_hyperparameters(X_train, y_train, n_classes):
             n_classes=n_classes
         )
 
+        # 学習
         model.fit(X_train, y_train, epochs=epochs, batch_size=batch_size, verbose=0)
 
+        # 訓練データでの精度（暫定指標）
         _, accuracy = model.evaluate(X_train, y_train, verbose=0)
         return accuracy
 
@@ -80,34 +102,39 @@ def optimize_hyperparameters(X_train, y_train, n_classes):
     study.optimize(objective, n_trials=20)
     return study.best_params
 
+#############################
 # 予想番号を 5 組作成する関数
-def generate_predictions(model, X_data, n_classes, class_labels, num_predictions=5, analysis_method="ニューラルネットワーク (単純)"):
+#############################
+def generate_predictions(model, X_data, n_classes, num_predictions=5, method="NN"):
     """
     Generates prediction numbers based on model probabilities.
     """
-    if analysis_method == "ランダムフォレスト":
-        # ランダムフォレストの場合は predict_proba を使用
-        predictions = model.predict_proba(X_data)  # shape = (n_samples, n_classes)
+    if method == "RF":
+        # ランダムフォレストの場合はpredict_probaを使用
+        predictions = model.predict_proba(X_data)
     else:
-        # ニューラルネットワークの場合は predict を使用
+        # ニューラルネットワークの場合はpredictを使用
         predictions = model.predict(X_data)  # shape = (n_samples, n_classes)
-
+    
     # Select 5 random samples
     indices = np.random.choice(range(len(X_data)), size=num_predictions, replace=False)
     result_list = []
-
+    
     for idx in indices:
         prob = predictions[idx]
-        top6 = np.argsort(prob)[-6:]  # 上位6クラスのインデックス
+        top6 = np.argsort(prob)[-6:]
         top6_sorted = sorted(top6)
-        # クラスインデックスをラベルにマッピング
-        top6_labels = [int(class_labels[i]) for i in top6_sorted]
-        result_list.append(top6_labels)
-
+        # Convert numpy integers to Python integers
+        top6_sorted = [int(num) for num in top6_sorted]
+        result_list.append(top6_sorted)
+    
     return result_list
 
+#############################
 # Streamlitアプリケーション
+#############################
 def main():
+    st.set_page_config(page_title="ロト6データ分析アプリ", layout="wide")  # レイアウトをwideに設定
     st.title("ロト6データ分析アプリ")
 
     # ファイルアップロード
@@ -127,7 +154,7 @@ def main():
             if st.button("分析を開始する"):
                 st.write("データを分析しています...")
                 # 前処理
-                X_scaled, y_encoded, n_classes, class_labels = preprocess_data(X, y)
+                X_scaled, y_encoded, n_classes = preprocess_data(X, y)
                 X_train, X_test, y_train, y_test = train_test_split(
                     X_scaled, y_encoded, test_size=0.2, random_state=42, stratify=y_encoded.argmax(axis=1)
                 )
@@ -176,14 +203,13 @@ def main():
 
                 # 予想5組作成
                 st.subheader("予想番号 5 組")
-                predictions_5sets = generate_predictions(model, X_test, n_classes, class_labels, num_predictions=5, analysis_method=analysis_method)
+                predictions_5sets = generate_predictions(model, X_test, n_classes, num_predictions=5, method=("RF" if analysis_method == "ランダムフォレスト" else "NN"))
 
-                # Display predictions using colored badges for better readability
+                # モバイルフレンドリーな表示
                 for i, pred in enumerate(predictions_5sets, start=1):
                     st.markdown(f"### 予想第 {i} 組")
-                    cols = st.columns(len(pred))
-                    for col, num in zip(cols, pred):
-                        col.markdown(f"<span style='background-color: #FFD700; padding: 5px 10px; border-radius: 10px; color: black;'>{num}</span>", unsafe_allow_html=True)
+                    numbers = ' '.join([f"<span style='background-color: #FFD700; padding: 5px 10px; border-radius: 10px; color: black; margin-right: 5px;'>{num}</span>" for num in pred])
+                    st.markdown(numbers, unsafe_allow_html=True)
 
                 st.success("分析 + 予想作成が完了しました！")
 
