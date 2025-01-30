@@ -32,9 +32,10 @@ def preprocess_data(X, y):
     encoder = OneHotEncoder(sparse_output=False)
     y_encoded = encoder.fit_transform(y.reshape(-1, 1))
 
-    # One-Hotエンコード後の列数をクラス数とする
+    # クラスラベルの取得（OneHotEncoderのcategories_属性）
+    class_labels = encoder.categories_[0]
     n_classes = y_encoded.shape[1]
-    return X_scaled, y_encoded, n_classes
+    return X_scaled, y_encoded, n_classes, class_labels
 
 # モデル構築関数
 def build_nn_model(input_dim, units, dropout, learning_rate, n_classes):
@@ -79,25 +80,30 @@ def optimize_hyperparameters(X_train, y_train, n_classes):
     study.optimize(objective, n_trials=20)
     return study.best_params
 
-# 予想番号を 5 組作成する関数（バッジ付き）
-def generate_predictions(model, X_data, n_classes, num_predictions=5):
+# 予想番号を 5 組作成する関数
+def generate_predictions(model, X_data, n_classes, class_labels, num_predictions=5, analysis_method="ニューラルネットワーク (単純)"):
     """
     Generates prediction numbers based on model probabilities.
     """
-    predictions = model.predict(X_data)  # shape = (n_samples, n_classes)
-    
+    if analysis_method == "ランダムフォレスト":
+        # ランダムフォレストの場合は predict_proba を使用
+        predictions = model.predict_proba(X_data)  # shape = (n_samples, n_classes)
+    else:
+        # ニューラルネットワークの場合は predict を使用
+        predictions = model.predict(X_data)  # shape = (n_samples, n_classes)
+
     # Select 5 random samples
     indices = np.random.choice(range(len(X_data)), size=num_predictions, replace=False)
     result_list = []
-    
+
     for idx in indices:
         prob = predictions[idx]
-        top6 = np.argsort(prob)[-6:]
+        top6 = np.argsort(prob)[-6:]  # 上位6クラスのインデックス
         top6_sorted = sorted(top6)
-        # Convert numpy integers to Python integers
-        top6_sorted = [int(num) for num in top6_sorted]
-        result_list.append(top6_sorted)
-    
+        # クラスインデックスをラベルにマッピング
+        top6_labels = [int(class_labels[i]) for i in top6_sorted]
+        result_list.append(top6_labels)
+
     return result_list
 
 # Streamlitアプリケーション
@@ -121,7 +127,7 @@ def main():
             if st.button("分析を開始する"):
                 st.write("データを分析しています...")
                 # 前処理
-                X_scaled, y_encoded, n_classes = preprocess_data(X, y)
+                X_scaled, y_encoded, n_classes, class_labels = preprocess_data(X, y)
                 X_train, X_test, y_train, y_test = train_test_split(
                     X_scaled, y_encoded, test_size=0.2, random_state=42, stratify=y_encoded.argmax(axis=1)
                 )
@@ -170,7 +176,7 @@ def main():
 
                 # 予想5組作成
                 st.subheader("予想番号 5 組")
-                predictions_5sets = generate_predictions(model, X_test, n_classes, num_predictions=5)
+                predictions_5sets = generate_predictions(model, X_test, n_classes, class_labels, num_predictions=5, analysis_method=analysis_method)
 
                 # Display predictions using colored badges for better readability
                 for i, pred in enumerate(predictions_5sets, start=1):
