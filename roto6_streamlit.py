@@ -79,7 +79,7 @@ def optimize_hyperparameters(X_train, y_train, n_classes):
     study.optimize(objective, n_trials=20)
     return study.best_params
 
-# 予想番号を 5 組作成する関数
+# 予想番号を 5 組作成する関数（バッジ付き）
 def generate_predictions(model, X_data, n_classes, num_predictions=5):
     """
     Generates prediction numbers based on model probabilities.
@@ -172,12 +172,12 @@ def main():
                 st.subheader("予想番号 5 組")
                 predictions_5sets = generate_predictions(model, X_test, n_classes, num_predictions=5)
 
-                # Display predictions using columns for better readability
+                # Display predictions using colored badges for better readability
                 for i, pred in enumerate(predictions_5sets, start=1):
                     st.markdown(f"### 予想第 {i} 組")
                     cols = st.columns(len(pred))
                     for col, num in zip(cols, pred):
-                        col.markdown(f"**{num}**")
+                        col.markdown(f"<span style='background-color: #FFD700; padding: 5px 10px; border-radius: 10px; color: black;'>{num}</span>", unsafe_allow_html=True)
 
                 st.success("分析 + 予想作成が完了しました！")
 
